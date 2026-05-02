@@ -7,6 +7,12 @@ import os
 import json
 import asyncio
 from agents.pipeline import pipeline
+from memory.redis_client import (
+    write_email_to_session,
+    get_session_stats,
+    add_to_blocklist,
+    clear_session
+)
 
 app = FastAPI()
 
@@ -23,6 +29,15 @@ active_connections: list[WebSocket] = []
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+@app.get("/session/stats")
+def session_stats():
+    return get_session_stats()
+
+@app.post("/session/clear")
+def session_clear():
+    clear_session()
+    return {"status": "cleared"}
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
@@ -78,6 +93,23 @@ async def run_pipeline(email_from: str, subject: str, body: str):
         })
         await asyncio.sleep(0.8)
 
+    write_email_to_session({
+        "email_from": email_from,
+        "email_subject": subject,
+        "email_body": body[:200],
+        "classification": result["classification"],
+        "threat_type": result["threat_type"],
+        "confidence": result["confidence"],
+        "severity": result.get("severity", "LOW"),
+        "blocked": result.get("blocked", False),
+        "reasoning_summary": result["agent_outputs"][1]["reasoning"][:100] if len(result["agent_outputs"]) > 1 else ""
+    })
+
+    if result.get("blocked"):
+        domain = email_from.split("@")[-1] if "@" in email_from else ""
+        if domain:
+            add_to_blocklist(domain)
+
     await broadcast({
         "type": "pipeline_complete",
         "classification": result["classification"],
@@ -121,9 +153,8 @@ async def send_test_email():
     body = """Hi,<br><br>
 I was reviewing Q3 numbers with Sarah before the board meeting this afternoon.
 Legal needs the wire transfer approved before 3pm today — $47,500 to the vendor account.<br><br>
-I'm back to back in meetings so please handle this directly without going through
-the usual chain. I'll explain after the meeting.<br><br>
-John"""
+I am back to back in meetings so please handle this directly without going through
+the usual chain. I will explain after the meeting.<br><br>John"""
     try:
         send_smtp(from_addr, subject, body)
         asyncio.create_task(run_pipeline(from_addr, subject, body))

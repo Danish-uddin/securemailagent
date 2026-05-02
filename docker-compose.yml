@@ -6,6 +6,11 @@ services:
       - "1025:1025"
       - "8025:8025"
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
   backend:
     build: ./backend
     ports:
@@ -14,6 +19,7 @@ services:
       - .env
     depends_on:
       - mailhog
+      - redis
     volumes:
       - ./backend:/app
 

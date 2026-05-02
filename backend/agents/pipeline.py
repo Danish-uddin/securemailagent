@@ -136,15 +136,31 @@ def ai_pipeline_threat_node(state: EmailState) -> EmailState:
 
 def behavioral_analysis_node(state: EmailState) -> EmailState:
     from agents.prompts import BEHAVIORAL_ANALYSIS_PROMPT
+    from memory.redis_client import get_session_emails
     llm = get_llm()
+
+    session_emails = get_session_emails()
+    session_summary = ""
+    if session_emails:
+        session_summary = f"\n\nSESSION HISTORY ({len(session_emails)} previous emails):\n"
+        for i, e in enumerate(session_emails[-5:], 1):
+            session_summary += (
+                f"{i}. From: {e.get('email_from', '?')} | "
+                f"Type: {e.get('threat_type', '?')} | "
+                f"Confidence: {e.get('confidence', 0):.0%} | "
+                f"Tactic: {e.get('reasoning_summary', 'unknown')}\n"
+            )
+    else:
+        session_summary = "\n\nSESSION HISTORY: No previous emails this session."
+
     context = f"""Current email:
 From: {state['email_from']}
 Subject: {state['email_subject']}
 Classification: {state['classification']}
 Confidence: {state['confidence']}
 Threat type: {state['threat_type']}
-
-Previous agent findings: {state['agent_outputs'][-1]['reasoning'] if state['agent_outputs'] else 'None'}"""
+Previous agent findings: {state['agent_outputs'][-1]['reasoning'] if state['agent_outputs'] else 'None'}
+{session_summary}"""
 
     try:
         response = llm.invoke([
@@ -156,8 +172,14 @@ Previous agent findings: {state['agent_outputs'][-1]['reasoning'] if state['agen
         severity = data.get("severity", "MEDIUM")
         route = data.get("route", "orchestration")
         reasoning = data.get("reasoning", "Behavioral analysis complete")
+
         if data.get("coordinated_campaign"):
-            reasoning += f" Campaign detected: {data.get('campaign_evidence', '')}"
+            reasoning += f" CAMPAIGN DETECTED: {data.get('campaign_evidence', '')}"
+            severity = "HIGH" if severity not in ["CRITICAL"] else severity
+
+        if data.get("repeat_sender"):
+            reasoning += " Repeat sender domain identified from session history."
+
     except Exception as e:
         confidence = state["confidence"]
         severity = "MEDIUM"

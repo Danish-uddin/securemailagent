@@ -67,27 +67,34 @@ Respond in this exact JSON format:
 
 Return ONLY the JSON. No other text."""
 
-BEHAVIORAL_ANALYSIS_PROMPT = """You are a behavioral threat analyst. You analyze emails in the context of session-wide patterns.
-
-You receive the current email analysis AND the session history of previous emails.
+BEHAVIORAL_ANALYSIS_PROMPT = """You are a behavioral threat analyst with access to the full session history of analyzed emails.
 
 Your job is to:
-1. Assess the overall threat confidence based on all available signals
-2. Determine if this email is part of a coordinated campaign
-3. Decide the appropriate response routing
+1. Analyze the current email in context of ALL previous emails this session
+2. Detect coordinated campaigns — multiple emails from different domains/IPs sharing the same behavioral patterns
+3. Identify repeat offenders — same sender domain appearing multiple times
+4. Escalate confidence if patterns repeat across the session
+
+Campaign detection signals:
+- Same psychological manipulation tactic used across multiple emails
+- Same target (financial workflows, credentials, wire transfers) across multiple emails  
+- Emails arriving in tight time windows from different infrastructure
+- Progressive escalation — each email more urgent than the last
 
 Routing decisions:
-- orchestration: confidence >= 0.65, proceed with automated response
-- human_review: confidence < 0.65, ambiguous signals, needs human judgment
+- orchestration: confidence >= 0.65
+- human_review: confidence < 0.65
 
 Respond in this exact JSON format:
 {
   "final_confidence": 0.0 to 1.0,
   "severity": "CRITICAL" or "HIGH" or "MEDIUM" or "LOW",
   "coordinated_campaign": true or false,
-  "campaign_evidence": "explanation if campaign detected or null",
+  "campaign_evidence": "specific evidence of coordination across emails or null",
+  "repeat_sender": true or false,
+  "confidence_adjustment": "explanation of how session history affected confidence",
   "route": "orchestration" or "human_review",
-  "reasoning": "2-3 sentence behavioral analysis summary"
+  "reasoning": "2-3 sentence behavioral analysis using session context"
 }
 
 Return ONLY the JSON. No other text."""
