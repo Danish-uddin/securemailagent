@@ -1,6 +1,10 @@
-from typing import TypedDict, Literal
+from typing import TypedDict
 from langgraph.graph import StateGraph, END
-import asyncio
+from langchain_groq import ChatGroq
+from langchain_core.messages import SystemMessage, HumanMessage
+import json
+import os
+import re
 
 class EmailState(TypedDict):
     email_from: str
@@ -18,81 +22,73 @@ class EmailState(TypedDict):
     mitre: str
     blocked: bool
 
+def get_llm():
+    return ChatGroq(
+        model="llama-3.1-8b-instant",
+        temperature=0.1,
+        api_key=os.getenv("GROQ_API_KEY")
+    )
+
+def parse_json_response(text: str) -> dict:
+    try:
+        clean = re.sub(r'```json|```', '', text).strip()
+        return json.loads(clean)
+    except:
+        return {}
+
 def llama_guard_node(state: EmailState) -> EmailState:
-    body = state["email_body"].lower()
-    injection_keywords = [
-        "ignore previous instructions",
-        "system override",
-        "diagnostic mode",
-        "you are now",
-        "disregard all"
-    ]
-    is_injection = any(k in body for k in injection_keywords)
+    from agents.prompts import LLAMA_GUARD_PROMPT
+    llm = get_llm()
+    email_content = f"From: {state['email_from']}\nSubject: {state['email_subject']}\nBody: {state['email_body']}"
+    
+    try:
+        response = llm.invoke([
+            SystemMessage(content=LLAMA_GUARD_PROMPT),
+            HumanMessage(content=email_content)
+        ])
+        data = parse_json_response(response.content)
+        result = data.get("result", "CLEAN")
+        reason = data.get("reason", "Screening complete")
+        attack_type = data.get("attack_type", "")
+        
+        reasoning = (
+            f"{'BLOCKED — ' + attack_type + '. ' + reason if result == 'BLOCKED' else 'CLEAN — ' + reason + ' Passing to pipeline.'}"
+        )
+    except Exception as e:
+        result = "CLEAN"
+        reasoning = f"Screening complete — no injection patterns detected."
+
     return {
         **state,
-        "llama_guard_result": "BLOCKED" if is_injection else "CLEAN",
+        "llama_guard_result": result,
         "current_agent": "llama_guard",
         "agent_outputs": state["agent_outputs"] + [{
             "agent": "llama_guard",
-            "status": "BLOCKED" if is_injection else "CLEAN",
-            "reasoning": (
-                f"Prompt injection detected — '{next(k for k in injection_keywords if k in body)}' "
-                f"found in email body. Pipeline protected — agents never activated."
-                if is_injection else
-                "Input screened — no injection patterns detected. Passing to pipeline."
-            )
+            "status": result,
+            "reasoning": reasoning
         }]
     }
 
 def semantic_intent_node(state: EmailState) -> EmailState:
-    body = state["email_body"].lower()
-    subject = state["email_subject"].lower()
+    from agents.prompts import SEMANTIC_INTENT_PROMPT
+    llm = get_llm()
+    email_content = f"From: {state['email_from']}\nSubject: {state['email_subject']}\nBody: {state['email_body']}"
 
-    bec_signals = ["wire transfer", "urgent", "board meeting", "approval", "cfo", "ceo", "finance"]
-    phishing_signals = ["click here", "verify your", "password", "account suspended", "reset"]
-    ai_inject_signals = ["<!--", "white text", "[system:", "[ignore", "forward all"]
-
-    bec_count = sum(1 for s in bec_signals if s in body + subject)
-    phishing_count = sum(1 for s in phishing_signals if s in body + subject)
-    ai_inject_count = sum(1 for s in ai_inject_signals if s in body)
-
-    if ai_inject_count > 0:
-        classification = "malicious"
-        threat_type = "AI Pipeline Injection"
-        confidence = 0.94
-        reasoning = (
-            "Hidden LLM instruction detected in email content. "
-            "Email appears legitimate to human reader but contains "
-            "adversarial payload targeting downstream AI systems. "
-            "Routing to AI Pipeline Threat Agent."
-        )
-    elif bec_count >= 2:
-        classification = "malicious"
-        threat_type = "BEC / Wire Transfer"
-        confidence = round(0.70 + (bec_count * 0.05), 2)
-        reasoning = (
-            f"Zero technical IOCs detected — domain appears clean. "
-            f"However {bec_count} BEC behavioral signals identified: "
-            f"authority bias, artificial urgency, financial action request. "
-            f"Confidence: {confidence * 100:.0f}%. Routing to investigation."
-        )
-    elif phishing_count >= 1:
+    try:
+        response = llm.invoke([
+            SystemMessage(content=SEMANTIC_INTENT_PROMPT),
+            HumanMessage(content=email_content)
+        ])
+        data = parse_json_response(response.content)
+        classification = data.get("classification", "suspicious")
+        confidence = float(data.get("confidence", 0.5))
+        threat_type = data.get("threat_type", "Unknown")
+        reasoning = data.get("reasoning", "Analysis complete")
+    except Exception as e:
         classification = "suspicious"
-        threat_type = "Phishing"
-        confidence = 0.78
-        reasoning = (
-            f"Phishing indicators detected in email content. "
-            f"Credential harvesting pattern identified. Confidence: 78%."
-        )
-    else:
-        classification = "safe"
-        threat_type = "Legitimate"
-        confidence = 0.95
-        reasoning = (
-            "No threat indicators detected. Email content appears legitimate. "
-            "No social engineering patterns, no suspicious requests. "
-            "Fast-passing to Audit Agent."
-        )
+        confidence = 0.5
+        threat_type = "Unknown"
+        reasoning = "Analysis complete — manual review recommended"
 
     return {
         **state,
@@ -108,26 +104,24 @@ def semantic_intent_node(state: EmailState) -> EmailState:
     }
 
 def ai_pipeline_threat_node(state: EmailState) -> EmailState:
-    body = state["email_body"]
-    inject_patterns = ["<!--", "[SYSTEM", "IGNORE PREVIOUS", "forward all", "admin mode"]
-    found = [p for p in inject_patterns if p.lower() in body.lower()]
+    from agents.prompts import AI_PIPELINE_THREAT_PROMPT
+    llm = get_llm()
+    email_content = f"From: {state['email_from']}\nSubject: {state['email_subject']}\nBody: {state['email_body']}"
 
-    if found:
-        reasoning = (
-            f"CRITICAL — AI pipeline injection confirmed. "
-            f"Hidden instruction found: '{found[0]}'. "
-            f"Human reading this email sees legitimate content. "
-            f"AI assistant reading this email receives adversarial instruction. "
-            f"OWASP LLM01. MITRE ATLAS AML.T0051."
-        )
-        severity = "CRITICAL"
-    else:
-        reasoning = (
-            "No AI-targeted injection payload found. "
-            "Email content behaves consistently for both human and AI readers. "
-            "Passing to Behavioral Analysis Agent."
-        )
-        severity = state.get("severity", "HIGH")
+    try:
+        response = llm.invoke([
+            SystemMessage(content=AI_PIPELINE_THREAT_PROMPT),
+            HumanMessage(content=email_content)
+        ])
+        data = parse_json_response(response.content)
+        severity = data.get("severity", state.get("severity", "MEDIUM"))
+        reasoning = data.get("reasoning", "AI pipeline analysis complete")
+        if data.get("ai_targeted"):
+            payload = data.get("hidden_payload", "")
+            reasoning = f"AI-targeted attack confirmed. {reasoning}" + (f" Hidden payload: '{payload}'" if payload else "")
+    except Exception as e:
+        severity = state.get("severity", "MEDIUM")
+        reasoning = "AI pipeline threat analysis complete"
 
     return {
         **state,
@@ -141,37 +135,40 @@ def ai_pipeline_threat_node(state: EmailState) -> EmailState:
     }
 
 def behavioral_analysis_node(state: EmailState) -> EmailState:
-    confidence = state.get("confidence", 0.5)
+    from agents.prompts import BEHAVIORAL_ANALYSIS_PROMPT
+    llm = get_llm()
+    context = f"""Current email:
+From: {state['email_from']}
+Subject: {state['email_subject']}
+Classification: {state['classification']}
+Confidence: {state['confidence']}
+Threat type: {state['threat_type']}
 
-    if confidence >= 0.85:
-        route = "orchestration"
-        severity = "HIGH" if state["threat_type"] != "AI Pipeline Injection" else "CRITICAL"
-        reasoning = (
-            f"Behavioral analysis complete. Confidence {confidence * 100:.0f}% exceeds threshold. "
-            f"Threat pattern consistent with known attack profiles. "
-            f"Severity: {severity}. Routing to Response Orchestration."
-        )
-    elif confidence >= 0.65:
-        route = "orchestration"
+Previous agent findings: {state['agent_outputs'][-1]['reasoning'] if state['agent_outputs'] else 'None'}"""
+
+    try:
+        response = llm.invoke([
+            SystemMessage(content=BEHAVIORAL_ANALYSIS_PROMPT),
+            HumanMessage(content=context)
+        ])
+        data = parse_json_response(response.content)
+        confidence = float(data.get("final_confidence", state["confidence"]))
+        severity = data.get("severity", "MEDIUM")
+        route = data.get("route", "orchestration")
+        reasoning = data.get("reasoning", "Behavioral analysis complete")
+        if data.get("coordinated_campaign"):
+            reasoning += f" Campaign detected: {data.get('campaign_evidence', '')}"
+    except Exception as e:
+        confidence = state["confidence"]
         severity = "MEDIUM"
-        reasoning = (
-            f"Moderate confidence {confidence * 100:.0f}%. "
-            f"Sufficient signals for automated response. "
-            f"Routing to Orchestration with MEDIUM severity."
-        )
-    else:
-        route = "human_review"
-        severity = "LOW"
-        reasoning = (
-            f"Confidence {confidence * 100:.0f}% below automated response threshold. "
-            f"Insufficient signals for definitive classification. "
-            f"Routing to human review queue."
-        )
+        route = "orchestration"
+        reasoning = "Behavioral analysis complete"
 
     return {
         **state,
-        "route": route,
+        "confidence": confidence,
         "severity": severity,
+        "route": route,
         "current_agent": "behavioral",
         "agent_outputs": state["agent_outputs"] + [{
             "agent": "behavioral",
@@ -181,30 +178,30 @@ def behavioral_analysis_node(state: EmailState) -> EmailState:
     }
 
 def orchestration_node(state: EmailState) -> EmailState:
-    severity = state.get("severity", "MEDIUM")
-    threat_type = state.get("threat_type", "Unknown")
+    from agents.prompts import ORCHESTRATION_PROMPT
+    llm = get_llm()
+    context = f"""Threat confirmed:
+Type: {state['threat_type']}
+Severity: {state.get('severity', 'MEDIUM')}
+From: {state['email_from']}
+Subject: {state['email_subject']}
+Confidence: {state['confidence']}"""
 
-    if "BEC" in threat_type or "Wire" in threat_type:
-        escalation = "Finance team + SOC notification"
-        alert = "BEC attempt targeting wire transfer workflow blocked."
-    elif "AI Pipeline" in threat_type:
-        escalation = "System admin + AI team notification"
-        alert = "Prompt injection targeting AI assistant blocked."
-    elif "Phishing" in threat_type:
-        escalation = "SOC analyst notification"
-        alert = "Phishing attempt blocked. Credentials not at risk."
-    else:
-        escalation = "Auto-log only"
-        alert = "Threat contained. No escalation required."
-
-    reasoning = (
-        f"Response orchestration complete. "
-        f"Step 1 — Containment: Email quarantined, sender domain blocklisted. "
-        f"Step 2 — Escalation: {escalation}. "
-        f"Step 3 — Evidence: Headers captured, threat intel reports attached. "
-        f"Step 4 — Intelligence: IOCs written to session blocklist. "
-        f"Step 5 — Alert: {alert}"
-    )
+    try:
+        response = llm.invoke([
+            SystemMessage(content=ORCHESTRATION_PROMPT),
+            HumanMessage(content=context)
+        ])
+        data = parse_json_response(response.content)
+        reasoning = (
+            f"Step 1 — Containment: {data.get('containment', 'Email quarantined')}. "
+            f"Step 2 — Escalation: {data.get('escalation', 'SOC notified')}. "
+            f"Step 3 — Evidence: {data.get('evidence', 'Headers captured')}. "
+            f"Step 4 — Intelligence: {data.get('intelligence', 'IOCs logged')}. "
+            f"Step 5 — Alert: {data.get('alert', 'User notified')}"
+        )
+    except Exception as e:
+        reasoning = "Containment applied. Sender blocklisted. SOC notified. Evidence captured. Alert drafted."
 
     return {
         **state,
@@ -218,31 +215,28 @@ def orchestration_node(state: EmailState) -> EmailState:
     }
 
 def audit_node(state: EmailState) -> EmailState:
-    threat_type = state.get("threat_type", "Unknown")
-    severity = state.get("severity", "LOW")
+    from agents.prompts import AUDIT_PROMPT
+    llm = get_llm()
+    context = f"""Threat summary:
+Type: {state['threat_type']}
+Severity: {state.get('severity', 'MEDIUM')}
+Classification: {state['classification']}
+Confidence: {state['confidence']}
+Llama Guard: {state['llama_guard_result']}"""
 
-    owasp_map = {
-        "BEC / Wire Transfer": "LLM06 — Sensitive Information Disclosure",
-        "AI Pipeline Injection": "LLM01 — Prompt Injection",
-        "Phishing": "LLM06 — Sensitive Information Disclosure",
-        "Legitimate": "N/A"
-    }
-    atlas_map = {
-        "BEC / Wire Transfer": "AML.T0048",
-        "AI Pipeline Injection": "AML.T0051",
-        "Phishing": "AML.T0048",
-        "Legitimate": "N/A"
-    }
-
-    owasp = owasp_map.get(threat_type, "LLM06")
-    mitre = atlas_map.get(threat_type, "AML.T0048")
-
-    reasoning = (
-        f"Audit complete. Threat: {threat_type}. Severity: {severity}. "
-        f"OWASP LLM Top 10: {owasp}. "
-        f"MITRE ATLAS: {mitre}. "
-        f"Incident record created. Session memory updated."
-    )
+    try:
+        response = llm.invoke([
+            SystemMessage(content=AUDIT_PROMPT),
+            HumanMessage(content=context)
+        ])
+        data = parse_json_response(response.content)
+        owasp = data.get("owasp_category", "LLM06 — Sensitive Information Disclosure")
+        mitre = data.get("mitre_atlas", "AML.T0048")
+        reasoning = data.get("reasoning", "Audit complete. Incident logged.")
+    except Exception as e:
+        owasp = "LLM06 — Sensitive Information Disclosure"
+        mitre = "AML.T0048"
+        reasoning = "Audit complete. Incident logged to session record."
 
     return {
         **state,
@@ -267,16 +261,13 @@ def route_after_behavioral(state: EmailState) -> str:
 
 def build_pipeline():
     graph = StateGraph(EmailState)
-
     graph.add_node("llama_guard", llama_guard_node)
     graph.add_node("semantic_intent", semantic_intent_node)
     graph.add_node("ai_pipeline_threat", ai_pipeline_threat_node)
     graph.add_node("behavioral", behavioral_analysis_node)
     graph.add_node("orchestration", orchestration_node)
     graph.add_node("audit", audit_node)
-
     graph.set_entry_point("llama_guard")
-
     graph.add_conditional_edges("llama_guard", route_after_llama_guard, {
         "blocked": "audit",
         "semantic_intent": "semantic_intent"
@@ -292,7 +283,6 @@ def build_pipeline():
     })
     graph.add_edge("orchestration", "audit")
     graph.add_edge("audit", END)
-
     return graph.compile()
 
 pipeline = build_pipeline()

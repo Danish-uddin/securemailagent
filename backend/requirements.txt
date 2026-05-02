@@ -3,4 +3,5 @@ uvicorn
 python-dotenv
 langgraph
 langchain-core
+langchain-groq
 websockets
