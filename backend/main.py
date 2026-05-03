@@ -6,6 +6,7 @@ from email.mime.multipart import MIMEMultipart
 import os
 import json
 import asyncio
+import httpx
 from agents.pipeline import pipeline
 from memory.redis_client import (
     write_email_to_session,
@@ -26,7 +27,50 @@ app.add_middleware(
 
 active_connections: list[WebSocket] = []
 
+MAILPIT_URL = os.getenv("MAILPIT_URL", "http://mailpit:8025")
+
+async def delete_latest_and_resend(
+    email_from: str,
+    subject: str,
+    body: str,
+    tags: list
+):
+    await asyncio.sleep(1)
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            res = await client.get(f"{MAILPIT_URL}/api/v1/messages")
+            messages = res.json().get("messages", [])
+            if not messages:
+                print("No messages to retag")
+                return
+            latest_id = messages[0]["ID"]
+            del_res = await client.request(
+                "DELETE",
+                f"{MAILPIT_URL}/api/v1/messages",
+                json={"IDs": [latest_id]}
+            )
+            print(f"Deleted {latest_id}: {del_res.status_code}")
+
+        def resend():
+            msg = MIMEMultipart("alternative")
+            msg['From'] = email_from
+            msg['To'] = "inbox@securemailagent.com"
+            msg['Subject'] = subject
+            msg['X-Tags'] = ', '.join(tags)
+            msg.attach(MIMEText(body, 'html'))
+            host = os.getenv("MAILHOG_SMTP_HOST", "mailpit")
+            port = int(os.getenv("MAILHOG_SMTP_PORT", 1025))
+            with smtplib.SMTP(host, port) as server:
+                server.send_message(msg)
+
+        await asyncio.get_event_loop().run_in_executor(None, resend)
+        print(f"Retagged email with: {tags}")
+
+    except Exception as e:
+        print(f"Retag error: {e}")
+
 @app.get("/health")
+
 def health():
     return {"status": "ok"}
 
@@ -92,9 +136,13 @@ async def run_pipeline(email_from: str, subject: str, body: str):
 
     await asyncio.sleep(0.3)
 
-    # Run VT before pipeline so it's always available regardless of routing
     from integrations.virustotal import scan_email_sync
-    vt_result = {"status": "skipped", "clean": True, "summary": "No URLs found", "details": None}
+    vt_result = {
+        "status": "skipped",
+        "clean": True,
+        "summary": "No URLs found",
+        "details": None
+    }
     try:
         vt_result = await asyncio.get_event_loop().run_in_executor(
             None, scan_email_sync, body
@@ -118,7 +166,7 @@ async def run_pipeline(email_from: str, subject: str, body: str):
         "owasp": "",
         "mitre": "",
         "blocked": False,
-        "threat_intel": {"virustotal": vt_result},  # Pre-populated
+        "threat_intel": {"virustotal": vt_result},
         "security_events": []
     }
 
@@ -135,6 +183,24 @@ async def run_pipeline(email_from: str, subject: str, body: str):
 
     for event in result.get("security_events", []):
         await broadcast(event)
+
+    # Tag email in Mailpit based on classification
+    import re
+    classification = result.get("classification", "")
+    threat_type = result.get("threat_type", "UNKNOWN")
+    clean_threat = re.sub(
+        r'[^A-Z0-9]+', '_',
+        threat_type.upper()
+    ).strip('_')
+
+    if classification == "safe":
+        tags = ["SAFE"]
+    else:
+        tags = ["MALICIOUS", clean_threat]
+
+    asyncio.create_task(
+        delete_latest_and_resend(email_from, subject, body, tags)
+    )
 
     write_email_to_session({
         "email_from": email_from,
@@ -178,7 +244,7 @@ def send_smtp(from_addr: str, subject: str, body: str):
     msg['To'] = "inbox@securemailagent.com"
     msg['Subject'] = subject
     msg.attach(MIMEText(body, 'html'))
-    host = os.getenv("MAILHOG_SMTP_HOST", "mailhog")
+    host = os.getenv("MAILHOG_SMTP_HOST", "mailpit")
     port = int(os.getenv("MAILHOG_SMTP_PORT", 1025))
     with smtplib.SMTP(host, port) as server:
         server.send_message(msg)
@@ -190,7 +256,9 @@ async def send_email(payload: dict):
     body = payload.get("body", "Test body")
     try:
         send_smtp(from_addr, subject, body)
-        asyncio.create_task(run_pipeline(from_addr, subject, body))
+        asyncio.create_task(
+            run_pipeline(from_addr, subject, body)
+        )
         return {"status": "sent"}
     except Exception as e:
         return {"status": "error", "detail": str(e)}
@@ -206,7 +274,9 @@ I am back to back in meetings so please handle this directly without going throu
 the usual chain. I will explain after the meeting.<br><br>John"""
     try:
         send_smtp(from_addr, subject, body)
-        asyncio.create_task(run_pipeline(from_addr, subject, body))
+        asyncio.create_task(
+            run_pipeline(from_addr, subject, body)
+        )
         return {"status": "sent"}
     except Exception as e:
         return {"status": "error", "detail": str(e)}

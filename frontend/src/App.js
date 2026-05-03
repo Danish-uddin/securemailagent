@@ -3,7 +3,7 @@ import useWebSocket from './hooks/useWebSocket'
 
 const API_URL = 'http://localhost:8000'
 const WS_URL = 'ws://localhost:8000/ws'
-const MAILHOG_URL = 'http://localhost:8025'
+const MAILPIT_URL = 'http://localhost:8025'
 
 const AGENTS = [
   { id: 'semantic_intent', label: 'SEMANTIC INTENT', protect: 'LlamaGuard' },
@@ -327,7 +327,7 @@ export default function App() {
       <div style={S.panel}>
         <div style={S.panelTitle}>Live Inbox</div>
         <iframe
-          src={MAILHOG_URL}
+          src={MAILPIT_URL}
           style={S.iframe}
           title="Live Inbox"
         />

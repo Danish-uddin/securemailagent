@@ -99,7 +99,6 @@ def semantic_intent_node(state: EmailState) -> EmailState:
         f"From: {state['email_from']}\n"
         f"Subject: {state['email_subject']}\n"
         f"Body: {state['email_body']}\n\n"
-        f"VirusTotal: {vt_result.get('summary', 'skipped')}"
     )
 
     try:

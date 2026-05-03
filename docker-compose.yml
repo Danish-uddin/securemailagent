@@ -1,10 +1,14 @@
 services:
 
-  mailhog:
-    image: mailhog/mailhog
+  mailpit:
+    image: axllent/mailpit
     ports:
       - "1025:1025"
       - "8025:8025"
+    environment:
+      MP_MAX_MESSAGES: 500
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
 
   redis:
     image: redis:7-alpine
@@ -18,7 +22,7 @@ services:
     env_file:
       - .env
     depends_on:
-      - mailhog
+      - mailpit
       - redis
     volumes:
       - ./backend:/app
