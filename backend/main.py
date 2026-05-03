@@ -39,6 +39,33 @@ def session_clear():
     clear_session()
     return {"status": "cleared"}
 
+@app.post("/test-security-events")
+async def test_security_events():
+    await broadcast({
+        "type": "security_event",
+        "layer": "INPUT",
+        "tool": "Llama Guard",
+        "detail": "Prompt injection blocked at Triage Agent input — agents never activated",
+        "target": "Triage Agent input layer"
+    })
+    await asyncio.sleep(0.5)
+    await broadcast({
+        "type": "security_event",
+        "layer": "OUTPUT",
+        "tool": "Guardrails AI",
+        "detail": "Role confusion blocked — agent attempted unauthorized response format",
+        "target": "Orchestration Agent output"
+    })
+    await asyncio.sleep(0.5)
+    await broadcast({
+        "type": "security_event",
+        "layer": "LEAKAGE",
+        "tool": "Presidio",
+        "detail": "PII detected and redacted — entities: EMAIL_ADDRESS",
+        "target": "Audit Agent log output"
+    })
+    return {"status": "sent"}
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
@@ -65,6 +92,17 @@ async def run_pipeline(email_from: str, subject: str, body: str):
 
     await asyncio.sleep(0.3)
 
+    # Run VT before pipeline so it's always available regardless of routing
+    from integrations.virustotal import scan_email_sync
+    vt_result = {"status": "skipped", "clean": True, "summary": "No URLs found", "details": None}
+    try:
+        vt_result = await asyncio.get_event_loop().run_in_executor(
+            None, scan_email_sync, body
+        )
+        print(f"VT PRE-PIPELINE RESULT: {vt_result}")
+    except Exception as e:
+        print(f"VT PRE-PIPELINE ERROR: {e}")
+
     initial_state = {
         "email_from": email_from,
         "email_subject": subject,
@@ -79,7 +117,9 @@ async def run_pipeline(email_from: str, subject: str, body: str):
         "severity": "",
         "owasp": "",
         "mitre": "",
-        "blocked": False
+        "blocked": False,
+        "threat_intel": {"virustotal": vt_result},  # Pre-populated
+        "security_events": []
     }
 
     result = pipeline.invoke(initial_state)
@@ -93,6 +133,9 @@ async def run_pipeline(email_from: str, subject: str, body: str):
         })
         await asyncio.sleep(0.8)
 
+    for event in result.get("security_events", []):
+        await broadcast(event)
+
     write_email_to_session({
         "email_from": email_from,
         "email_subject": subject,
@@ -102,13 +145,18 @@ async def run_pipeline(email_from: str, subject: str, body: str):
         "confidence": result["confidence"],
         "severity": result.get("severity", "LOW"),
         "blocked": result.get("blocked", False),
-        "reasoning_summary": result["agent_outputs"][1]["reasoning"][:100] if len(result["agent_outputs"]) > 1 else ""
+        "reasoning_summary": (
+            result["agent_outputs"][1]["reasoning"][:100]
+            if len(result["agent_outputs"]) > 1 else ""
+        )
     })
 
     if result.get("blocked"):
         domain = email_from.split("@")[-1] if "@" in email_from else ""
         if domain:
             add_to_blocklist(domain)
+
+    print(f"THREAT INTEL BROADCAST: {result.get('threat_intel', {})}")
 
     await broadcast({
         "type": "pipeline_complete",
@@ -120,7 +168,8 @@ async def run_pipeline(email_from: str, subject: str, body: str):
         "mitre": result.get("mitre", ""),
         "blocked": result.get("blocked", False),
         "email_from": email_from,
-        "subject": subject
+        "subject": subject,
+        "threat_intel": result.get("threat_intel", {})
     })
 
 def send_smtp(from_addr: str, subject: str, body: str):

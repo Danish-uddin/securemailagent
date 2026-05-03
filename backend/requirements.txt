@@ -6,3 +6,8 @@ langchain-core
 langchain-groq
 websockets
 redis
+presidio-analyzer
+presidio-anonymizer
+spacy
+httpx
+nest_asyncio
