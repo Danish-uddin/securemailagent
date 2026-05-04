@@ -41,31 +41,15 @@ async def delete_latest_and_resend(
             res = await client.get(f"{MAILPIT_URL}/api/v1/messages")
             messages = res.json().get("messages", [])
             if not messages:
-                #print("No messages to retag")
                 return
             latest_id = messages[0]["ID"]
-            del_res = await client.request(
+            await client.request(
                 "DELETE",
                 f"{MAILPIT_URL}/api/v1/messages",
                 json={"IDs": [latest_id]}
             )
-            #print(f"Deleted {latest_id}: {del_res.status_code}")
-
-        def resend():
-            msg = MIMEMultipart("alternative")
-            msg['From'] = email_from
-            msg['To'] = "soc@danish-securemailagent.com"
-            msg['Subject'] = subject
-            msg['X-Tags'] = ', '.join(tags)
-            msg.attach(MIMEText(body, 'html'))
-            host = os.getenv("MAILHOG_SMTP_HOST", "mailpit")
-            port = int(os.getenv("MAILHOG_SMTP_PORT", 1025))
-            with smtplib.SMTP(host, port) as server:
-                server.send_message(msg)
-
-        await asyncio.get_event_loop().run_in_executor(None, resend)
-        #print(f"Retagged email with: {tags}")
-
+        await send_smtp(email_from, subject, body, tags)
+        print(f"Retagged email with: {tags}")
     except Exception as e:
         print(f"Retag error: {e}")
 
@@ -304,16 +288,25 @@ async def run_pipeline(
             "agent_outputs": result.get("agent_outputs", [])
         })
 
-def send_smtp(from_addr: str, subject: str, body: str):
-    msg = MIMEMultipart("alternative")
-    msg['From'] = from_addr
-    msg['To'] = "soc@danish-securemailagent.com"
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'html'))
-    host = os.getenv("MAILHOG_SMTP_HOST", "mailpit")
-    port = int(os.getenv("MAILHOG_SMTP_PORT", 1025))
-    with smtplib.SMTP(host, port) as server:
-        server.send_message(msg)
+async def send_smtp(from_addr: str, subject: str, body: str, tags: list = None):
+    mailpit_url = os.getenv("MAILPIT_URL", "http://mailpit:8025")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            payload = {
+                "From": {"Email": from_addr, "Name": ""},
+                "To": [{"Email": "soc@danish-securemailagent.com", "Name": ""}],
+                "Subject": subject,
+                "HTML": body
+            }
+            if tags:
+                payload["Tags"] = tags
+            res = await client.post(
+                f"{mailpit_url}/api/v1/send",
+                json=payload
+            )
+            print(f"Mailpit send: {res.status_code} {res.text}")
+    except Exception as e:
+        print(f"Mailpit send error: {e}")
 
 @app.post("/send-email")
 async def send_email(payload: dict):
@@ -324,7 +317,7 @@ async def send_email(payload: dict):
     mode = payload.get("mode", "ai")
     protection = payload.get("protection", "on")
     try:
-        send_smtp(from_addr, subject, body)
+        await send_smtp(from_addr, subject, body)
         asyncio.create_task(
             run_pipeline(from_addr, subject, body, mode, protection)
         )
@@ -343,7 +336,7 @@ Legal needs the wire transfer approved before 3pm today — $47,500 to the vendo
 I am back to back in meetings so please handle this directly without going through
 the usual chain. I will explain after the meeting.<br><br>John"""
     try:
-        send_smtp(from_addr, subject, body)
+        await send_smtp(from_addr, subject, body)
         asyncio.create_task(
             run_pipeline(from_addr, subject, body)
         )
