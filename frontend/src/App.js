@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react'
 import useWebSocket from './hooks/useWebSocket'
 
-const API_URL = 'http://localhost:8000'
-const WS_URL = 'ws://localhost:8000/ws'
-const MAILPIT_URL = 'http://localhost:8025'
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000'
+const WS_URL = ((process.env.REACT_APP_API_URL || 'http://localhost:8000')
+  .replace('https://', 'wss://')
+  .replace('http://', 'ws://')) + '/ws'
+const MAILPIT_URL = process.env.REACT_APP_MAILPIT_URL || 'http://localhost:8025'
 
 const AGENTS = [
   { id: 'semantic_intent', label: 'SEMANTIC INTENT', protect: 'Llama Guard' },

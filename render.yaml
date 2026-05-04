@@ -1,0 +1,65 @@
+services:
+
+  - type: web
+    name: securemailagent-mailpit
+    runtime: image
+    image:
+      url: docker.io/axllent/mailpit
+    envVars:
+      - key: MP_MAX_MESSAGES
+        value: 500
+      - key: MP_SMTP_AUTH_ACCEPT_ANY
+        value: 1
+      - key: MP_SMTP_AUTH_ALLOW_INSECURE
+        value: 1
+
+  - type: web
+    name: securemailagent-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: VIRUSTOTAL_API_KEY
+        sync: false
+      - key: REDIS_HOST
+        fromService:
+          name: securemailagent-redis
+          type: redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          name: securemailagent-redis
+          type: redis
+          property: port
+      - key: MAILHOG_SMTP_HOST
+        value: securemailagent-mailpit
+      - key: MAILHOG_SMTP_PORT
+        value: 1025
+      - key: MAILPIT_URL
+        fromService:
+          name: securemailagent-mailpit
+          type: web
+          property: url
+
+  - type: web
+    name: securemailagent-frontend
+    runtime: docker
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    buildArgs:
+      - name: REACT_APP_API_URL
+        fromService:
+          name: securemailagent-backend
+          type: web
+          property: url
+      - name: REACT_APP_MAILPIT_URL
+        fromService:
+          name: securemailagent-mailpit
+          type: web
+          property: url
+
+  - type: redis
+    name: securemailagent-redis
+    plan: free
