@@ -48,13 +48,13 @@ services:
     runtime: docker
     dockerfilePath: ./frontend/Dockerfile
     dockerContext: ./frontend
-    buildArgs:
-      - name: REACT_APP_API_URL
+    envVars:
+      - key: REACT_APP_API_URL
         fromService:
           name: securemailagent-backend
           type: web
           property: url
-      - name: REACT_APP_MAILPIT_URL
+      - key: REACT_APP_MAILPIT_URL
         fromService:
           name: securemailagent-mailpit
           type: web
