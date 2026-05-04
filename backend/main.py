@@ -127,11 +127,19 @@ async def broadcast(message: dict):
         except:
             pass
 
-async def run_pipeline(email_from: str, subject: str, body: str):
+async def run_pipeline(
+    email_from: str,
+    subject: str,
+    body: str,
+    mode: str = "ai",
+    protection: str = "on"
+
+):
     await broadcast({
         "type": "pipeline_start",
         "email_from": email_from,
-        "subject": subject
+        "subject": subject,
+        "mode": mode
     })
 
     await asyncio.sleep(0.3)
@@ -147,10 +155,49 @@ async def run_pipeline(email_from: str, subject: str, body: str):
         vt_result = await asyncio.get_event_loop().run_in_executor(
             None, scan_email_sync, body
         )
-        print(f"VT PRE-PIPELINE RESULT: {vt_result}")
     except Exception as e:
         print(f"VT PRE-PIPELINE ERROR: {e}")
 
+    # SOAR ONLY MODE — skip all agents
+    if mode == "soar":
+        is_malicious = not vt_result.get("clean", True)
+        classification = "malicious" if is_malicious else "safe"
+        threat_type = "Malicious URL" if is_malicious else "No IOCs Detected"
+
+        await broadcast({
+            "type": "agent_update",
+            "agent": "soar_only",
+            "status": "SOAR_SCAN",
+            "reasoning": (
+                f"SOAR ONLY MODE — AI agents disabled. "
+                f"VirusTotal result: {vt_result.get('summary', 'No URLs found')}. "
+                f"{'Malicious URL detected — blocking.' if is_malicious else 'No IOCs found — email passes through undetected. A zero-IOC social engineering attack would not be caught in this mode.'}"
+            )
+        })
+        await asyncio.sleep(0.8)
+
+        tags = ["MALICIOUS", "MALICIOUS_URL"] if is_malicious else ["UNDETECTED", "SOAR_BYPASS"]
+        asyncio.create_task(
+            delete_latest_and_resend(email_from, subject, body, tags)
+        )
+
+        await broadcast({
+            "type": "pipeline_complete",
+            "classification": classification,
+            "threat_type": threat_type,
+            "severity": "HIGH" if is_malicious else "NONE",
+            "confidence": 1.0 if is_malicious else 0.0,
+            "owasp": "",
+            "mitre": "",
+            "blocked": is_malicious,
+            "email_from": email_from,
+            "subject": subject,
+            "threat_intel": {"virustotal": vt_result},
+            "mode": "soar"
+        })
+        return
+
+    # AI AGENTS MODE — full pipeline
     initial_state = {
         "email_from": email_from,
         "email_subject": subject,
@@ -167,7 +214,8 @@ async def run_pipeline(email_from: str, subject: str, body: str):
         "mitre": "",
         "blocked": False,
         "threat_intel": {"virustotal": vt_result},
-        "security_events": []
+        "security_events": [],
+        "protection": protection
     }
 
     result = pipeline.invoke(initial_state)
@@ -184,7 +232,6 @@ async def run_pipeline(email_from: str, subject: str, body: str):
     for event in result.get("security_events", []):
         await broadcast(event)
 
-    # Tag email in Mailpit based on classification
     import re
     classification = result.get("classification", "")
     threat_type = result.get("threat_type", "UNKNOWN")
@@ -235,7 +282,8 @@ async def run_pipeline(email_from: str, subject: str, body: str):
         "blocked": result.get("blocked", False),
         "email_from": email_from,
         "subject": subject,
-        "threat_intel": result.get("threat_intel", {})
+        "threat_intel": result.get("threat_intel", {}),
+        "mode": "ai"
     })
 
 def send_smtp(from_addr: str, subject: str, body: str):
@@ -254,11 +302,15 @@ async def send_email(payload: dict):
     from_addr = payload.get("from", "test@example.com")
     subject = payload.get("subject", "Test Email")
     body = payload.get("body", "Test body")
+
+    mode = payload.get("mode", "ai")
+    protection = payload.get("protection", "on")
     try:
         send_smtp(from_addr, subject, body)
         asyncio.create_task(
-            run_pipeline(from_addr, subject, body)
+            run_pipeline(from_addr, subject, body, mode, protection)
         )
+
         return {"status": "sent"}
     except Exception as e:
         return {"status": "error", "detail": str(e)}

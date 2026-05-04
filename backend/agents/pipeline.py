@@ -24,6 +24,7 @@ class EmailState(TypedDict):
     blocked: bool
     threat_intel: dict
     security_events: list
+    protection: str
 
 def get_llm():
     return ChatGroq(
@@ -39,10 +40,24 @@ def parse_json_response(text: str) -> dict:
     except:
         return {}
 
+
 def llama_guard_node(state: EmailState) -> EmailState:
     from agents.prompts import LLAMA_GUARD_PROMPT
     from security.presidio import protect_output
     llm = get_llm()
+
+    if state.get("protection") == "off":
+        return {
+            **state,
+            "llama_guard_result": "DISABLED",
+            "current_agent": "llama_guard",
+            "agent_outputs": state["agent_outputs"] + [{
+                "agent": "llama_guard",
+                "status": "DISABLED",
+                "reasoning": "⚠️ Protection OFF — Llama Guard input screening disabled. Prompt injections will reach the agents unfiltered."
+            }]
+        }
+
     email_content = f"From: {state['email_from']}\nSubject: {state['email_subject']}\nBody: {state['email_body']}"
 
     try:
@@ -63,7 +78,11 @@ def llama_guard_node(state: EmailState) -> EmailState:
         result = "CLEAN"
         reasoning = "Screening complete — no injection patterns detected."
 
-    safe_reasoning, pii_event = protect_output(reasoning)
+    if state.get("protection") == "off":
+        safe_reasoning = reasoning
+        pii_event = None
+    else:
+        safe_reasoning, pii_event = protect_output(reasoning)
     events = list(state.get("security_events", []))
     if pii_event:
         events.append(pii_event)
@@ -117,7 +136,11 @@ def semantic_intent_node(state: EmailState) -> EmailState:
         threat_type = "Unknown"
         reasoning = "Analysis complete — manual review recommended"
 
-    safe_reasoning, pii_event = protect_output(reasoning)
+    if state.get("protection") == "off":
+        safe_reasoning = reasoning
+        pii_event = None
+    else:
+        safe_reasoning, pii_event = protect_output(reasoning)
     events = list(state.get("security_events", []))
     if pii_event:
         events.append(pii_event)
@@ -242,7 +265,11 @@ def behavioral_analysis_node(state: EmailState) -> EmailState:
         route = "orchestration"
         reasoning = "Behavioral analysis complete"
 
-    safe_reasoning, pii_event = protect_output(reasoning)
+    if state.get("protection") == "off":
+        safe_reasoning = reasoning
+        pii_event = None
+    else:
+        safe_reasoning, pii_event = protect_output(reasoning)
     events = list(state.get("security_events", []))
     if pii_event:
         events.append(pii_event)
@@ -281,23 +308,38 @@ def orchestration_node(state: EmailState) -> EmailState:
             SystemMessage(content=ORCHESTRATION_PROMPT),
             HumanMessage(content=context)
         ])
-        data = parse_json_response(response.content)
-        validation = validate_orchestration_output(data)
 
-        if not validation["valid"]:
-            reasoning = (
-                f"Response blocked by Guardrails AI — "
-                f"violations: {', '.join(validation['violations'])}. "
-                f"Fallback response applied."
-            )
-        else:
+        data = parse_json_response(response.content)
+
+        if state.get("protection") == "off":
+            # Skip Guardrails validation
             reasoning = (
                 f"Step 1 — Containment: {data.get('containment', 'Email quarantined')}. "
                 f"Step 2 — Escalation: {data.get('escalation', 'SOC notified')}. "
                 f"Step 3 — Evidence: {data.get('evidence', 'Headers captured')}. "
                 f"Step 4 — Intelligence: {data.get('intelligence', 'IOCs logged')}. "
-                f"Step 5 — Alert: {data.get('alert', 'User notified')}"
+                f"Step 5 — Alert: {data.get('alert', 'User notified')}. "
+                f"⚠️ Guardrails AI validation skipped — protection is OFF."
             )
+            validation = {"event": None}
+        else:
+            validation = validate_orchestration_output(data)
+            if not validation["valid"]:
+                reasoning = (
+                    f"Response blocked by Guardrails AI — "
+                    f"violations: {', '.join(validation['violations'])}. "
+                    f"Fallback response applied."
+                )
+            else:
+                reasoning = (
+                    f"Step 1 — Containment: {data.get('containment', 'Email quarantined')}. "
+                    f"Step 2 — Escalation: {data.get('escalation', 'SOC notified')}. "
+                    f"Step 3 — Evidence: {data.get('evidence', 'Headers captured')}. "
+                    f"Step 4 — Intelligence: {data.get('intelligence', 'IOCs logged')}. "
+                    f"Step 5 — Alert: {data.get('alert', 'User notified')}"
+                )
+
+
     except Exception:
         reasoning = (
             "Containment applied. Sender blocklisted. "
@@ -305,7 +347,11 @@ def orchestration_node(state: EmailState) -> EmailState:
         )
         validation = {"event": None}
 
-    safe_reasoning, pii_event = protect_output(reasoning)
+    if state.get("protection") == "off":
+        safe_reasoning = reasoning
+        pii_event = None
+    else:
+        safe_reasoning, pii_event = protect_output(reasoning)
     events = list(state.get("security_events", []))
     if pii_event:
         events.append(pii_event)
@@ -352,7 +398,11 @@ def audit_node(state: EmailState) -> EmailState:
         mitre = "AML.T0048"
         reasoning = "Audit complete. Incident logged to session record."
 
-    safe_reasoning, pii_event = protect_output(reasoning)
+    if state.get("protection") == "off":
+        safe_reasoning = reasoning
+        pii_event = None
+    else:
+        safe_reasoning, pii_event = protect_output(reasoning)
     events = list(state.get("security_events", []))
     if pii_event:
         events.append(pii_event)
