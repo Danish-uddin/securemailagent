@@ -70,9 +70,26 @@ async def delete_latest_and_resend(
         print(f"Retag error: {e}")
 
 @app.get("/health")
-
 def health():
     return {"status": "ok"}
+
+@app.get("/test-smtp")
+async def test_smtp():
+    import smtplib
+    from email.mime.text import MIMEText
+    host = os.getenv("MAILHOG_SMTP_HOST", "mailpit")
+    port = int(os.getenv("MAILHOG_SMTP_PORT", 1025))
+    try:
+        msg = MIMEText("Test email body")
+        msg['From'] = "test@test.com"
+        msg['To'] = "inbox@test.com"
+        msg['Subject'] = "SMTP Test"
+        s = smtplib.SMTP(host, port, timeout=10)
+        s.send_message(msg)
+        s.quit()
+        return {"status": "success", "host": host, "port": port}
+    except Exception as e:
+        return {"status": "error", "error": str(e), "host": host, "port": port}
 
 @app.get("/session/stats")
 def session_stats():
