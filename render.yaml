@@ -69,3 +69,4 @@ services:
   - type: redis
     name: securemailagent-redis
     plan: free
+    ipAllowList: []
