@@ -59,15 +59,9 @@ services:
     dockerContext: ./frontend
     envVars:
       - key: REACT_APP_API_URL
-        fromService:
-          name: securemailagent-backend
-          type: web
-          property: hostport
+        value: https://securemailagent-backend.onrender.com
       - key: REACT_APP_MAILPIT_URL
-        fromService:
-          name: securemailagent-mailpit
-          type: web
-          property: hostport
+        value: https://securemailagent-mailpit.onrender.com
 
   - type: redis
     name: securemailagent-redis
