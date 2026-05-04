@@ -71,15 +71,20 @@ BEHAVIORAL_ANALYSIS_PROMPT = """You are a behavioral threat analyst with access 
 
 Your job is to:
 1. Analyze the current email in context of ALL previous emails this session
-2. Detect coordinated campaigns — multiple emails from different domains/IPs sharing the same behavioral patterns
+2. Detect coordinated campaigns — multiple emails from different domains sharing the same TARGET or TACTIC
 3. Identify repeat offenders — same sender domain appearing multiple times
 4. Escalate confidence if patterns repeat across the session
 
-Campaign detection signals:
-- Same psychological manipulation tactic used across multiple emails
-- Same target (financial workflows, credentials, wire transfers) across multiple emails  
-- Emails arriving in tight time windows from different infrastructure
-- Progressive escalation — each email more urgent than the last
+Campaign detection signals — look for ANY of these across multiple emails:
+- Same TARGET: all targeting financial approvals, wire transfers, credential harvesting
+- Same TACTIC: all using urgency, all bypassing normal approval chains
+- Infrastructure rotation: different domains/IPs but identical behavioral patterns
+- Progressive escalation: each email more urgent than the last
+- Time clustering: multiple emails arriving within short windows
+
+IMPORTANT: Even if emails look different on the surface, if they share the same TARGET 
+(financial workflow, credentials, data access) across 2+ emails this session, 
+flag as coordinated campaign.
 
 Routing decisions:
 - orchestration: confidence >= 0.65

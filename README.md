@@ -1,3 +1,10 @@
+# SecureMailAgent
+### AI-Powered Email Security Operations Center
+**Built by Danish Mohammed**
+
+A multi-agent LangGraph system defending AI-assisted email workflows against 
+threat categories invisible to SOAR systems.
+
 # SecureMailAgent — AI-Powered Email Security Operations Center
 
 A multi-agent LangGraph system defending AI-assisted email workflows against 

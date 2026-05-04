@@ -54,7 +54,7 @@ async def delete_latest_and_resend(
         def resend():
             msg = MIMEMultipart("alternative")
             msg['From'] = email_from
-            msg['To'] = "inbox@securemailagent.com"
+            msg['To'] = "soc@danish-securemailagent.com"
             msg['Subject'] = subject
             msg['X-Tags'] = ', '.join(tags)
             msg.attach(MIMEText(body, 'html'))
@@ -272,24 +272,25 @@ async def run_pipeline(
     #print(f"THREAT INTEL BROADCAST: {result.get('threat_intel', {})}")
 
     await broadcast({
-        "type": "pipeline_complete",
-        "classification": result["classification"],
-        "threat_type": result["threat_type"],
-        "severity": result.get("severity", "LOW"),
-        "confidence": result["confidence"],
-        "owasp": result.get("owasp", ""),
-        "mitre": result.get("mitre", ""),
-        "blocked": result.get("blocked", False),
-        "email_from": email_from,
-        "subject": subject,
-        "threat_intel": result.get("threat_intel", {}),
-        "mode": "ai"
-    })
+            "type": "pipeline_complete",
+            "classification": result["classification"],
+            "threat_type": result["threat_type"],
+            "severity": result.get("severity", "LOW"),
+            "confidence": result["confidence"],
+            "owasp": result.get("owasp", ""),
+            "mitre": result.get("mitre", ""),
+            "blocked": result.get("blocked", False),
+            "email_from": email_from,
+            "subject": subject,
+            "threat_intel": result.get("threat_intel", {}),
+            "mode": "ai",
+            "agent_outputs": result.get("agent_outputs", [])
+        })
 
 def send_smtp(from_addr: str, subject: str, body: str):
     msg = MIMEMultipart("alternative")
     msg['From'] = from_addr
-    msg['To'] = "inbox@securemailagent.com"
+    msg['To'] = "soc@danish-securemailagent.com"
     msg['Subject'] = subject
     msg.attach(MIMEText(body, 'html'))
     host = os.getenv("MAILHOG_SMTP_HOST", "mailpit")

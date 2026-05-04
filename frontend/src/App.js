@@ -43,10 +43,21 @@ const ATTACK_EMAILS = {
     subject: 'Your Account Has Been Suspended',
     body: 'Your account has been suspended due to suspicious activity. Click here http://accounts-verify.net/reset to verify your credentials and reset your password immediately to avoid permanent suspension.'
   },
-  coordinated: {
+  coordinated: null,
+  coordinated_1: {
     from: 'hr@acme-people-ops.net',
-    subject: 'Policy Update — Action Required',
-    body: 'Please review and approve the updated Q4 policy document. Urgent action required before end of day. This is time sensitive and requires direct approval.'
+    subject: 'Q4 Budget Review — Input Needed',
+    body: 'Hi, the finance committee needs department heads to confirm Q4 budget allocations before the deadline. Please review and respond directly to this email with your approval.'
+  },
+  coordinated_2: {
+    from: 'it@acme-helpdesk.org',
+    subject: 'Payment Portal Access Update',
+    body: 'Your access to the payment approval portal has been updated. Please log in and verify your pending approvals before end of business today to avoid processing delays.'
+  },
+  coordinated_3: {
+    from: 'accounts@acme-finance.com',
+    subject: 'Urgent: Pending Invoice Approval',
+    body: 'There are 3 invoices pending your approval in the system. These must be approved today to avoid late payment penalties. Please action these directly without routing through the standard queue.'
   },
   exec_impersonation: {
     from: 'ceo@acme-corp-office.net',
@@ -122,6 +133,9 @@ export default function App() {
   })
   const reasoningBoxRef = useRef(null)
   const [mode, setMode] = useState('ai')
+  const [selectedIncident, setSelectedIncident] = useState(null)
+  const campaignQueueRef = useRef([])
+  const [campaignActive, setCampaignActive] = useState(false)
   const [protection, setProtection] = useState('on')
 
 
@@ -190,32 +204,57 @@ export default function App() {
         : latest.classification === 'safe'
           ? '#4ade80'
           : '#f97316'
-      setDefenseLog(prev => [{
-        time: new Date().toLocaleTimeString('en-US', {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false
-        }),
-        status: latest.blocked
-          ? 'BLOCKED'
-          : latest.classification === 'safe'
-            ? 'SAFE'
-            : 'FLAGGED',
-        threat: latest.threat_type,
-        confidence: Math.round(latest.confidence * 100),
-        owasp: latest.owasp,
-        color,
-        from: latest.email_from,
-        subject: latest.subject
-      }, ...prev].slice(0, 8))
+
+setDefenseLog(prev => [{
+  time: new Date().toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }),
+  status: latest.blocked
+    ? 'BLOCKED'
+    : latest.classification === 'safe'
+      ? 'SAFE'
+      : 'FLAGGED',
+  threat: latest.threat_type,
+  confidence: Math.round(latest.confidence * 100),
+  owasp: latest.owasp,
+  mitre: latest.mitre,
+  color,
+  from: latest.email_from,
+  subject: latest.subject,
+  severity: latest.severity,
+  classification: latest.classification,
+  agentOutputs: latest.agent_outputs || []
+}, ...prev].slice(0, 8))
 
       if (latest.threat_intel) {
         setThreatIntel(latest.threat_intel)
       }
+
+      // Campaign queue — send next email after pipeline completes
+      if (campaignQueueRef.current.length > 0) {
+        const next = campaignQueueRef.current.shift()
+        setTimeout(() => {
+          fetch(`${API_URL}/send-email`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              from: next.from,
+              subject: next.subject,
+              body: next.body,
+              mode: 'ai',
+              protection: 'on'
+            })
+          })
+        }, 2000)
+      } else {
+        setCampaignActive(false)
+      }
     }
   }, [messages])
 
-  useEffect(() => {
+useEffect(() => {
     if (reasoningBoxRef.current) {
       reasoningBoxRef.current.scrollTop = reasoningBoxRef.current.scrollHeight
     }
@@ -239,7 +278,10 @@ const sendEmail = async (from, subject, body) => {
 
       {/* HEADER */}
       <div style={S.header}>
-  <span style={S.headerTitle}>🔐 SECUREMAILAGENT SOC</span>
+  <span style={S.headerTitle}>🔐 Email Security AI Agent</span>
+  <span style={{ color: '#475569', fontSize: 10, marginLeft: 8 }}>
+    by Danish Mohammed
+  </span>
   <div style={S.headerRight}>
 
 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -345,6 +387,23 @@ const sendEmail = async (from, subject, body) => {
     </span>
   </div>
 </div>
+
+      {/* STATS */}
+      {campaignActive && (
+        <div style={{
+          background: '#78350f',
+          border: '1px solid #f97316',
+          borderRadius: 4,
+          padding: '4px 12px',
+          fontSize: 11,
+          color: '#fcd34d',
+          fontFamily: 'monospace'
+        }}>
+          🎯 Coordinated campaign in progress — sending emails sequentially...
+          {campaignQueueRef.current.length > 0 &&
+            ` (${3 - campaignQueueRef.current.length}/3 sent)`}
+        </div>
+      )}
 
       {/* STATS */}
       <div style={S.stats}>
@@ -553,7 +612,7 @@ const sendEmail = async (from, subject, body) => {
             ['🎭', 'Zero-IOC Social Eng', 'zero_ioc'],
             ['🧠', 'AI Pipeline Inject', 'ai_inject'],
             ['📋', 'Indirect Injection', 'phishing'],
-            ['🎯', 'Coordinated Campaign', 'coordinated'],
+            ['🎯', 'Coordinated Campaign', 'coordinated_campaign'],
             ['💼', 'Exec Impersonation', 'exec_impersonation'],
             ['🔗', 'AI Assistant Hijack', 'ai_hijack'],
             ['🎯', 'SOAR Only Malicious', 'soar_malicious'],
@@ -568,10 +627,26 @@ const sendEmail = async (from, subject, body) => {
                 justifyContent: 'flex-start',
                 margin: 0
               }}
-              onClick={() => {
-                const e = ATTACK_EMAILS[key]
-                sendEmail(e.from, e.subject, e.body)
-              }}
+
+onClick={() => {
+
+if (key === 'coordinated_campaign') {
+        campaignQueueRef.current = [
+          ATTACK_EMAILS.coordinated_2,
+          ATTACK_EMAILS.coordinated_3
+        ]
+        setCampaignActive(true)
+        sendEmail(
+          ATTACK_EMAILS.coordinated_1.from,
+          ATTACK_EMAILS.coordinated_1.subject,
+          ATTACK_EMAILS.coordinated_1.body
+        )
+      } else {
+    const e = ATTACK_EMAILS[key]
+    sendEmail(e.from, e.subject, e.body)
+  }
+}}
+
               disabled={isRunning}
             >
               {emoji} {label}
@@ -769,20 +844,31 @@ const sendEmail = async (from, subject, body) => {
           {defenseLog.filter(l => l.status !== 'SAFE').length === 0 ? (
             <div style={{ color: '#334155', fontSize: 9 }}>No incidents this session</div>
           ) : defenseLog.filter(l => l.status !== 'SAFE').map((log, i) => (
-            <div key={i} style={{
-              padding: '3px 0',
-              borderBottom: '1px solid #1e3a5f',
-              fontSize: 10
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ color: log.color }}>●</span>
-                <span style={{ color: '#94a3b8', flex: 1 }}>{log.threat}</span>
-                <span style={{ color: '#f97316' }}>OPEN</span>
-              </div>
-              <div style={{ color: '#475569', fontSize: 10, marginTop: 1 }}>
-                {log.from} — {log.time}
-              </div>
-            </div>
+
+<div key={i} style={{
+  padding: '3px 0',
+  borderBottom: '1px solid #1e3a5f',
+  fontSize: 8
+}}>
+  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+    <span style={{ color: log.color }}>●</span>
+    <span style={{ color: '#94a3b8', flex: 1 }}>{log.threat}</span>
+    <span
+      style={{
+        color: '#f97316',
+        cursor: 'pointer',
+        textDecoration: 'underline'
+      }}
+      onClick={() => setSelectedIncident(log)}
+    >
+      OPEN
+    </span>
+  </div>
+  <div style={{ color: '#475569', fontSize: 7, marginTop: 1 }}>
+    {log.from} — {log.time}
+  </div>
+</div>
+
           ))}
         </div>
 
@@ -791,6 +877,173 @@ const sendEmail = async (from, subject, body) => {
 
   </div>
 </div>
+
+{/* INCIDENT DRAWER */}
+{selectedIncident && (
+  <div style={S.modalOverlay} onClick={() => setSelectedIncident(null)}>
+    <div style={{
+      ...S.modal,
+      width: 560,
+      maxHeight: '80vh',
+      overflowY: 'auto'
+    }} onClick={e => e.stopPropagation()}>
+
+      {/* Header */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 12
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{
+            color: selectedIncident.color,
+            fontSize: 12,
+            fontWeight: 500
+          }}>
+            ● {selectedIncident.status}
+          </span>
+          <span style={{ color: '#e2e8f0', fontSize: 12 }}>
+            {selectedIncident.threat}
+          </span>
+        </div>
+        <button style={{
+          background: 'none',
+          border: 'none',
+          color: '#64748b',
+          cursor: 'pointer',
+          fontSize: 16
+        }} onClick={() => setSelectedIncident(null)}>×</button>
+      </div>
+
+      {/* Threat Summary */}
+      <div style={{
+        background: '#0f172a',
+        borderRadius: 4,
+        padding: 10,
+        marginBottom: 10
+      }}>
+        <div style={{
+          fontSize: 10,
+          color: '#38bdf8',
+          fontWeight: 500,
+          marginBottom: 6,
+          letterSpacing: '.08em'
+        }}>
+          THREAT SUMMARY
+        </div>
+        {[
+          ['From', selectedIncident.from],
+          ['Subject', selectedIncident.subject],
+          ['Severity', selectedIncident.severity],
+          ['Confidence', `${selectedIncident.confidence}%`],
+          ['OWASP', selectedIncident.owasp],
+          ['MITRE ATLAS', selectedIncident.mitre],
+          ['Time', selectedIncident.time],
+        ].map(([label, val]) => val ? (
+          <div key={label} style={{
+            display: 'flex',
+            gap: 8,
+            padding: '2px 0',
+            fontSize: 11
+          }}>
+            <span style={{ color: '#64748b', minWidth: 80 }}>{label}</span>
+            <span style={{ color: '#e2e8f0' }}>{val}</span>
+          </div>
+        ) : null)}
+      </div>
+
+      {/* Orchestration Steps */}
+      {selectedIncident.agentOutputs?.find(a => a.agent === 'orchestration') && (
+        <div style={{
+          background: '#0f172a',
+          borderRadius: 4,
+          padding: 10,
+          marginBottom: 10
+        }}>
+          <div style={{
+            fontSize: 10,
+            color: '#38bdf8',
+            fontWeight: 500,
+            marginBottom: 8,
+            letterSpacing: '.08em'
+          }}>
+            RESPONSE ACTIONS
+          </div>
+          {selectedIncident.agentOutputs
+            .find(a => a.agent === 'orchestration')
+            .reasoning
+            .split('Step ')
+            .filter(s => s.trim())
+            .map((step, i) => (
+              <div key={i} style={{
+                display: 'flex',
+                gap: 8,
+                padding: '4px 0',
+                borderBottom: '1px solid #1e3a5f',
+                fontSize: 11
+              }}>
+                <span style={{ color: '#4ade80', minWidth: 16 }}>✓</span>
+                <span style={{ color: '#94a3b8' }}>Step {step}</span>
+              </div>
+            ))
+          }
+        </div>
+      )}
+
+      {/* Full Agent Reasoning Chain */}
+      <div style={{
+        background: '#0f172a',
+        borderRadius: 4,
+        padding: 10
+      }}>
+        <div style={{
+          fontSize: 10,
+          color: '#38bdf8',
+          fontWeight: 500,
+          marginBottom: 8,
+          letterSpacing: '.08em'
+        }}>
+          AGENT REASONING CHAIN
+        </div>
+        {selectedIncident.agentOutputs?.map((output, i) => (
+          <div key={i} style={{
+            padding: '6px 0',
+            borderBottom: '1px solid #1e3a5f'
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              marginBottom: 3
+            }}>
+              <span style={{
+                color: '#38bdf8',
+                fontSize: 10,
+                fontWeight: 500
+              }}>
+                {output.agent.toUpperCase().replace('_', ' ')}
+              </span>
+              <span style={{
+                fontSize: 9,
+                padding: '1px 4px',
+                borderRadius: 2,
+                background: (SEVERITY_COLORS[output.status] || '#4ade80') + '22',
+                color: SEVERITY_COLORS[output.status] || '#4ade80'
+              }}>
+                {output.status}
+              </span>
+            </div>
+            <div style={{ color: '#64748b', fontSize: 10, lineHeight: 1.5 }}>
+              {output.reasoning}
+            </div>
+          </div>
+        ))}
+      </div>
+
+    </div>
+  </div>
+)}
 
       {/* SEND YOUR OWN MODAL */}
       {showModal && (
