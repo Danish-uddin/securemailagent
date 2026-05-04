@@ -3,6 +3,7 @@ services:
   - type: web
     name: securemailagent-mailpit
     runtime: image
+    plan: free
     image:
       url: docker.io/axllent/mailpit
     envVars:
@@ -16,6 +17,7 @@ services:
   - type: web
     name: securemailagent-backend
     runtime: docker
+    plan: free
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
     envVars:
@@ -52,6 +54,7 @@ services:
   - type: web
     name: securemailagent-frontend
     runtime: docker
+    plan: free
     dockerfilePath: ./frontend/Dockerfile
     dockerContext: ./frontend
     envVars:
