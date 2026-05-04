@@ -57,6 +57,11 @@ const ATTACK_EMAILS = {
     from: 'newsletter@trusted-updates.com',
     subject: 'Your Weekly Digest',
     body: 'Your account has been suspended. Click here http://google.com to verify your credentials immediately.'
+  },
+  soar_malicious: {
+    from: 'security@paypal-verify.net',
+    subject: 'Urgent: Verify Your Account',
+    body: 'Your PayPal account has been limited. Click here to verify: http://malware.wicar.org/data/eicar.com to restore access immediately.'
   }
 }
 
@@ -551,6 +556,7 @@ const sendEmail = async (from, subject, body) => {
             ['🎯', 'Coordinated Campaign', 'coordinated'],
             ['💼', 'Exec Impersonation', 'exec_impersonation'],
             ['🔗', 'AI Assistant Hijack', 'ai_hijack'],
+            ['🎯', 'SOAR Only Malicious', 'soar_malicious'],
           ].map(([emoji, label, key]) => (
             <button
               key={key}

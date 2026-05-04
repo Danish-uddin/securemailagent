@@ -41,7 +41,7 @@ async def delete_latest_and_resend(
             res = await client.get(f"{MAILPIT_URL}/api/v1/messages")
             messages = res.json().get("messages", [])
             if not messages:
-                print("No messages to retag")
+                #print("No messages to retag")
                 return
             latest_id = messages[0]["ID"]
             del_res = await client.request(
@@ -49,7 +49,7 @@ async def delete_latest_and_resend(
                 f"{MAILPIT_URL}/api/v1/messages",
                 json={"IDs": [latest_id]}
             )
-            print(f"Deleted {latest_id}: {del_res.status_code}")
+            #print(f"Deleted {latest_id}: {del_res.status_code}")
 
         def resend():
             msg = MIMEMultipart("alternative")
@@ -64,7 +64,7 @@ async def delete_latest_and_resend(
                 server.send_message(msg)
 
         await asyncio.get_event_loop().run_in_executor(None, resend)
-        print(f"Retagged email with: {tags}")
+        #print(f"Retagged email with: {tags}")
 
     except Exception as e:
         print(f"Retag error: {e}")
@@ -269,7 +269,7 @@ async def run_pipeline(
         if domain:
             add_to_blocklist(domain)
 
-    print(f"THREAT INTEL BROADCAST: {result.get('threat_intel', {})}")
+    #print(f"THREAT INTEL BROADCAST: {result.get('threat_intel', {})}")
 
     await broadcast({
         "type": "pipeline_complete",
