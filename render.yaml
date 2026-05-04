@@ -34,14 +34,20 @@ services:
           type: redis
           property: port
       - key: MAILHOG_SMTP_HOST
-        value: securemailagent-mailpit
+        fromService:
+          name: securemailagent-mailpit
+          type: web
+          property: host
       - key: MAILHOG_SMTP_PORT
-        value: 1025
+        fromService:
+          name: securemailagent-mailpit
+          type: web
+          property: port
       - key: MAILPIT_URL
         fromService:
           name: securemailagent-mailpit
           type: web
-          property: url
+          property: hostport
 
   - type: web
     name: securemailagent-frontend
@@ -53,12 +59,12 @@ services:
         fromService:
           name: securemailagent-backend
           type: web
-          property: url
+          property: hostport
       - key: REACT_APP_MAILPIT_URL
         fromService:
           name: securemailagent-mailpit
           type: web
-          property: url
+          property: hostport
 
   - type: redis
     name: securemailagent-redis
