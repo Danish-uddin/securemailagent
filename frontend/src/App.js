@@ -152,10 +152,10 @@ export default function App() {
       setActiveAgent(null)
       setReasoningLog([])
       setIsRunning(true)
-      setPendingStart(false)
     }
 
     if (latest.type === 'agent_update') {
+      setPendingStart(false)
       setActiveAgent(latest.agent)
       setAgentStates(prev => ({
         ...prev,
@@ -595,7 +595,28 @@ useEffect(() => {
 
   {/* LEFT — Mailpit Iframe 40% */}
 <div style={{ ...S.panel, width: '40%', padding: 10, display: 'flex', flexDirection: 'column' }}>
-    <div style={S.panelTitle}>Live Inbox</div>
+    
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+  <div style={S.panelTitle}>Live Inbox</div>
+  <button
+    style={{
+      background: '#1e293b',
+      border: '1px solid #334155',
+      borderRadius: 4,
+      color: '#64748b',
+      fontSize: 10,
+      padding: '2px 8px',
+      cursor: 'pointer',
+      fontFamily: 'monospace'
+    }}
+    onClick={async () => {
+      await fetch(`${API_URL}/clear-inbox`, { method: 'POST' })
+    }}
+  >
+    🗑 Clear
+  </button>
+</div>
+
     <iframe
       src={MAILPIT_URL}
       style={{ ...S.iframe, flex: 1, height: 300 }}

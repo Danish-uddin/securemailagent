@@ -81,6 +81,23 @@ async def delete_latest_and_resend(
 def health():
     return {"status": "ok"}
 
+@app.post("/clear-inbox")
+async def clear_inbox():
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            res = await client.get(f"{MAILPIT_URL}/api/v1/messages")
+            messages = res.json().get("messages", [])
+            if messages:
+                ids = [m["ID"] for m in messages]
+                await client.request(
+                    "DELETE",
+                    f"{MAILPIT_URL}/api/v1/messages",
+                    json={"IDs": ids}
+                )
+        return {"status": "cleared"}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
 @app.get("/test-smtp")
 async def test_smtp():
     import smtplib
