@@ -36,6 +36,7 @@ async def delete_latest_and_resend(
 ):
     await asyncio.sleep(1)
     try:
+        print(f"Startup: clearing Mailpit at {MAILPIT_URL}")
         async with httpx.AsyncClient(timeout=5) as client:
             res = await client.get(f"{MAILPIT_URL}/api/v1/messages")
             messages = res.json().get("messages", [])
@@ -57,6 +58,7 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
+        print(f"Startup: clearing Mailpit at {MAILPIT_URL}")
         async with httpx.AsyncClient(timeout=5) as client:
             res = await client.get(f"{MAILPIT_URL}/api/v1/messages")
             messages = res.json().get("messages", [])

@@ -152,6 +152,7 @@ export default function App() {
       setActiveAgent(null)
       setReasoningLog([])
       setIsRunning(true)
+      setPendingStart(false)
     }
 
     if (latest.type === 'agent_update') {
@@ -272,7 +273,6 @@ useEffect(() => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ from, subject, body, mode, protection })
       })
-      setPendingStart(false)
     } catch (e) {
       console.error(e)
       setPendingStart(false)
