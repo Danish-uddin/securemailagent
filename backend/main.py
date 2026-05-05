@@ -1,5 +1,6 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -15,6 +16,28 @@ from memory.redis_client import (
     clear_session
 )
 
+MAILPIT_URL = os.getenv("MAILPIT_URL", "http://mailpit:8025")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        print(f"Startup: clearing Mailpit at {MAILPIT_URL}")
+        async with httpx.AsyncClient(timeout=5) as client:
+            res = await client.get(f"{MAILPIT_URL}/api/v1/messages")
+            messages = res.json().get("messages", [])
+            if messages:
+                ids = [m["ID"] for m in messages]
+                await client.request(
+                    "DELETE",
+                    f"{MAILPIT_URL}/api/v1/messages",
+                    json={"IDs": ids}
+                )
+                print(f"Cleared {len(ids)} messages on startup")
+    except Exception as e:
+        print(f"Startup clear error: {e}")
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,8 +48,6 @@ app.add_middleware(
 )
 
 active_connections: list[WebSocket] = []
-
-MAILPIT_URL = os.getenv("MAILPIT_URL", "http://mailpit:8025")
 
 async def delete_latest_and_resend(
     email_from: str,
@@ -53,28 +74,8 @@ async def delete_latest_and_resend(
     except Exception as e:
         print(f"Retag error: {e}")
 
-from contextlib import asynccontextmanager
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    try:
-        print(f"Startup: clearing Mailpit at {MAILPIT_URL}")
-        async with httpx.AsyncClient(timeout=5) as client:
-            res = await client.get(f"{MAILPIT_URL}/api/v1/messages")
-            messages = res.json().get("messages", [])
-            if messages:
-                ids = [m["ID"] for m in messages]
-                await client.request(
-                    "DELETE",
-                    f"{MAILPIT_URL}/api/v1/messages",
-                    json={"IDs": ids}
-                )
-                print(f"Cleared {len(ids)} messages on startup")
-    except Exception as e:
-        print(f"Startup clear error: {e}")
-    yield
 
-app = FastAPI(lifespan=lifespan)
 
 @app.get("/health")
 def health():
