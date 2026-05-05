@@ -138,6 +138,7 @@ export default function App() {
   const [selectedIncident, setSelectedIncident] = useState(null)
   const campaignQueueRef = useRef([])
   const [campaignActive, setCampaignActive] = useState(false)
+  const [pendingStart, setPendingStart] = useState(false)
   const [protection, setProtection] = useState('on')
 
 
@@ -262,16 +263,19 @@ useEffect(() => {
     }
   }, [reasoningLog])
 
-const sendEmail = async (from, subject, body) => {
+  const sendEmail = async (from, subject, body) => {
     if (isRunning) return
+    setPendingStart(true)
     try {
       await fetch(`${API_URL}/send-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ from, subject, body, mode, protection })
       })
+      setPendingStart(false)
     } catch (e) {
       console.error(e)
+      setPendingStart(false)
     }
   }
 
@@ -533,11 +537,15 @@ const sendEmail = async (from, subject, body) => {
           </div>
 
     <div style={S.reasoningBox} ref={reasoningBoxRef}>
-      {reasoningLog.length === 0 ? (
-        <div style={{ color: '#334155', fontSize: 10 }}>
-          Waiting for email analysis...
-        </div>
-      ) : reasoningLog.map((entry, i) => (
+      {pendingStart ? (
+    <div style={{ color: '#f97316', fontSize: 11 }}>
+      ⏳ Waking up pipeline — free tier cold start, ready in ~30 seconds...
+    </div>
+  ) : reasoningLog.length === 0 ? (
+    <div style={{ color: '#334155', fontSize: 11 }}>
+      Waiting for email analysis...
+    </div>
+  ) : reasoningLog.map((entry, i) => (
         <div key={i} style={{
           borderBottom: i < reasoningLog.length - 1
             ? '1px solid #1e3a5f'
