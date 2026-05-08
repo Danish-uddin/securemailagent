@@ -78,6 +78,7 @@ async def delete_latest_and_resend(
 
 
 @app.get("/health")
+@app.head("/health")
 def health():
     return {"status": "ok"}
 
